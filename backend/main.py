@@ -1,8 +1,6 @@
 import os
-import uuid
-from pathlib import Path
+import base64
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -15,41 +13,48 @@ load_dotenv("../.env")
 app = FastAPI()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Create a directory for static files (audio) if it doesn't exist
-STATIC_DIR = Path("static")
-AUDIO_DIR = STATIC_DIR / "audio"
-AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-
-# Mount the static directory to serve files
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-# --- Pydantic Models for API data structure ---
+# --- Pydantic Models ---
+# The choice model now includes its own audio data again
 class StoryChoice(BaseModel):
     text: str
-    audio_url: str
+    audio_b64: str
 
+# The main response sends a combined narration audio AND choices with their own audio
 class StorySegment(BaseModel):
     story_text: str
-    story_audio_url: str
+    narration_audio_b64: str
     choices: list[StoryChoice]
     conversation_history: list[dict]
 
-class StoryRequest(BaseModel):
-    conversation_history: list[dict]
-    choice: str | None = None
+class StartStoryRequest(BaseModel):
     config: dict
 
-# --- Helper Functions ---
+class NextStepRequest(BaseModel):
+    conversation_history: list[dict]
+    choice: str
+    config: dict
+
+# --- Helper Functions (generate_tts_bytes, parse_story_and_choices, get_story_prompt) remain the same ---
+def generate_tts_bytes(text: str, voice: str) -> bytes | None:
+    """Generates audio from text and returns it as bytes."""
+    try:
+        response = client.audio.speech.create(model="tts-1", voice=voice, input=text)
+        return response.content
+    except Exception as e:
+        print(f"Error generating TTS: {e}")
+        return None
+
+def parse_story_and_choices(response_text: str):
+    choices_text = re.findall(r'\[(.*?)\]', response_text)
+    story_part = re.split(r'\[', response_text)[0].strip()
+    return story_part, choices_text
+
 def get_story_prompt(config: dict):
-    # This is the same master prompt from the previous version
     child_info = config.get("child_info", {})
     personalization = config.get("personalization", {})
     personalization_details = ", ".join(
-        f"{key.replace('_', ' ')} is {value}"
-        for key, value in personalization.items()
-        if value is not None
+        f"{key.replace('_', ' ')} is {value}" for key, value in personalization.items() if value
     )
-    # The prompt remains the same...
     return f"""
     You are a world-class bedtime storyteller for a {child_info.get('age', 6)}-year-old child named {child_info.get('name', 'Friend')}.
     Your primary goal is to create a gentle, interactive, and personalized story that always ends happily and teaches a positive lesson.
@@ -66,92 +71,51 @@ def get_story_prompt(config: dict):
     Do not start the story yet. Your first task is to ask a single, imaginative question with three choices to help {child_info['name']} choose an adventure.
     """
 
-def generate_tts(text: str, voice: str) -> str:
-    """Generates audio from text and returns the URL path."""
-    try:
-        filename = f"{uuid.uuid4()}.mp3"
-        filepath = AUDIO_DIR / filename
-        
-        response = client.audio.speech.create(
-            model="tts-1",
-            voice=voice,
-            input=text
-        )
-        response.stream_to_file(filepath)
-        # Return the web-accessible path
-        return f"/static/audio/{filename}"
-    except Exception:
-        # Return an empty string or error path if TTS fails
-        return ""
-
-def parse_story_and_choices(response_text: str):
-    """Parses the LLM response into story text and a list of choices."""
-    choices_text = re.findall(r'\[(.*?)\]', response_text)
-    story_part = re.split(r'\[', response_text)[0].strip()
-    return story_part, choices_text
-
 # --- API Endpoints ---
-@app.post("/start_story", response_model=StorySegment)
-async def start_story(request: StoryRequest):
-    """Generates the first part of the story."""
-    system_prompt = get_story_prompt(request.config)
-    
-    history = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": "Let's begin the story."}
-    ]
-
-    response = client.chat.completions.create(
-        model="gpt-4o", messages=history, temperature=0.8
-    )
+async def process_story_segment(history: list, config: dict) -> StorySegment:
+    response = client.chat.completions.create(model="gpt-4o", messages=history, temperature=0.8)
     llm_response_text = response.choices[0].message.content
     history.append({"role": "assistant", "content": llm_response_text})
 
-    story_text, choices_list = parse_story_and_choices(llm_response_text)
-    voice = request.config.get("voice", "alloy")
+    story_text, choices_list_text = parse_story_and_choices(llm_response_text)
+    voice = config.get("voice", "alloy")
 
-    # Generate audio for all parts
-    story_audio_url = generate_tts(story_text, voice)
-    choices_with_audio = [
-        {"text": choice, "audio_url": generate_tts(choice, voice)}
-        for choice in choices_list
-    ]
+    # --- NEW HYBRID AUDIO LOGIC ---
 
-    return {
-        "story_text": story_text,
-        "story_audio_url": story_audio_url,
-        "choices": choices_with_audio,
-        "conversation_history": history
-    }
-
-@app.post("/next_step", response_model=StorySegment)
-async def next_step(request: StoryRequest):
-    """Generates the next segment of the story based on user's choice."""
-    history = request.conversation_history
-    history.append({"role": "user", "content": request.choice})
-
-    response = client.chat.completions.create(
-        model="gpt-4o", messages=history, temperature=0.8
-    )
-    llm_response_text = response.choices[0].message.content
-    history.append({"role": "assistant", "content": llm_response_text})
+    # 1. Generate the combined audio for seamless narration
+    text_for_narration = story_text
+    if choices_list_text:
+        choices_narration = ". ".join(choices_list_text)
+        text_for_narration += f" {choices_narration}"
     
-    story_text, choices_list = parse_story_and_choices(llm_response_text)
-    voice = request.config.get("voice", "alloy")
+    narration_audio_bytes = generate_tts_bytes(text_for_narration, voice) or b""
+    narration_audio_b64 = base64.b64encode(narration_audio_bytes).decode('utf-8')
 
-    story_audio_url = generate_tts(story_text, voice)
-    choices_with_audio = [
-        {"text": choice, "audio_url": generate_tts(choice, voice)}
-        for choice in choices_list
-    ]
-    
-    # Check for the end of the story
-    if not choices_list or "the end" in story_text.lower():
+    # 2. Generate individual audio for each choice for the replay buttons
+    choices_with_audio = []
+    for choice_text in choices_list_text:
+        choice_audio_bytes = generate_tts_bytes(choice_text, voice) or b""
+        choice_audio_b64 = base64.b64encode(choice_audio_bytes).decode('utf-8')
+        choices_with_audio.append({"text": choice_text, "audio_b64": choice_audio_b64})
+
+    if not choices_list_text or "the end" in story_text.lower():
         choices_with_audio = []
 
-    return {
-        "story_text": story_text,
-        "story_audio_url": story_audio_url,
-        "choices": choices_with_audio,
-        "conversation_history": history
-    }
+    return StorySegment(
+        story_text=story_text,
+        narration_audio_b64=narration_audio_b64,
+        choices=choices_with_audio,
+        conversation_history=history
+    )
+
+@app.post("/start_story", response_model=StorySegment)
+async def start_story(request: StartStoryRequest):
+    system_prompt = get_story_prompt(request.config)
+    history = [{"role": "system", "content": system_prompt}, {"role": "user", "content": "Let's begin."}]
+    return await process_story_segment(history, request.config)
+
+@app.post("/next_step", response_model=StorySegment)
+async def next_step(request: NextStepRequest):
+    history = request.conversation_history
+    history.append({"role": "user", "content": request.choice})
+    return await process_story_segment(history, request.config)

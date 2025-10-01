@@ -1,7 +1,7 @@
 import streamlit as st
 import yaml
 import requests
-import time
+import base64
 
 # --- Configuration ---
 BACKEND_URL = "http://127.0.0.1:8000"
@@ -19,18 +19,24 @@ st.title("✨ Welcome to Story Weaver ✨")
 # --- Session State Initialization ---
 if 'view' not in st.session_state:
     st.session_state.view = 'intro'
-if 'story_data' not in st.session_state:
-    st.session_state.story_data = None
 if 'history' not in st.session_state:
     st.session_state.history = []
+if 'audio_to_play' not in st.session_state:
+    st.session_state.audio_to_play = None
+
+# --- UI Elements ---
+# This placeholder will be used to play audio clips without disrupting the layout
+audio_placeholder = st.empty()
+
+# If an audio clip is scheduled to play, render it here and reset
+if st.session_state.audio_to_play:
+    audio_placeholder.audio(st.session_state.audio_to_play, format='audio/mp3', autoplay=True)
+    st.session_state.audio_to_play = None
 
 # --- API Call Functions ---
 def get_story_start():
-    response = requests.post(
-        f"{BACKEND_URL}/start_story",
-        json={"conversation_history": [], "config": config}
-    )
-    response.raise_for_status() # Will raise an exception for 4XX/5XX errors
+    response = requests.post(f"{BACKEND_URL}/start_story", json={"config": config})
+    response.raise_for_status()
     return response.json()
 
 def get_story_next(history, choice):
@@ -42,41 +48,35 @@ def get_story_next(history, choice):
     return response.json()
 
 # --- UI Views ---
-
-# 1. INTRO VIEW
 if st.session_state.view == 'intro':
     try:
-        video_file = open(config['intro_video_path'], 'rb')
-        video_bytes = video_file.read()
-        st.video(video_bytes)
+        with open(config['intro_video_path'], 'rb') as video_file:
+            video_bytes = video_file.read()
+            st.video(video_bytes)
     except FileNotFoundError:
         st.warning(f"Intro video not found at: {config['intro_video_path']}")
 
     if st.button("Let's start the adventure!"):
         with st.spinner("Our storyteller is getting ready..."):
             try:
-                st.session_state.story_data = get_story_start()
-                st.session_state.history.append(st.session_state.story_data)
+                story_data = get_story_start()
+                st.session_state.history = [story_data]
                 st.session_state.view = 'story'
+                # Schedule the main narration audio to play automatically
+                st.session_state.audio_to_play = base64.b64decode(story_data['narration_audio_b64'])
                 st.rerun()
             except requests.exceptions.RequestException as e:
                 st.error(f"Could not connect to the story engine. Is the backend running? Error: {e}")
 
-# 2. STORY VIEW
 elif st.session_state.view == 'story':
-    # Display the full story history
+    # Display the full story history from the session state
     for entry in st.session_state.history:
         st.markdown(entry['story_text'])
     
+    # Get the most recent story segment to work with
     current_segment = st.session_state.history[-1]
     
-    # Auto-play the audio for the latest story part
-    if current_segment['story_audio_url']:
-        # The autoplay feature can be sensitive in browsers. A small delay can help.
-        time.sleep(0.5) 
-        st.audio(f"{BACKEND_URL}{current_segment['story_audio_url']}", autoplay=True)
-
-    # Display choices if the story is not over
+    # Check if the story has ended
     if not current_segment['choices']:
         st.balloons()
         st.markdown("### The End")
@@ -88,25 +88,24 @@ elif st.session_state.view == 'story':
         st.markdown("---")
         st.write("**What should we do next?**")
         
+        # Display the choices with replay buttons
         for choice in current_segment['choices']:
-            col1, col2 = st.columns([0.8, 0.2])
+            col1, col2 = st.columns([0.85, 0.15])
             
             with col1:
+                # Button to select a choice and continue the story
                 if st.button(choice['text'], key=f"choice_{choice['text']}"):
                     with st.spinner("Turning the page..."):
-                        try:
-                            next_segment = get_story_next(
-                                current_segment['conversation_history'],
-                                choice['text']
-                            )
-                            st.session_state.story_data = next_segment
-                            st.session_state.history.append(next_segment)
-                            st.rerun()
-                        except requests.exceptions.RequestException as e:
-                            st.error(f"Could not connect to the story engine. Error: {e}")
-
+                        next_segment = get_story_next(
+                            current_segment['conversation_history'],
+                            choice['text']
+                        )
+                        st.session_state.history.append(next_segment)
+                        # Schedule the next segment's main narration to play
+                        st.session_state.audio_to_play = base64.b64decode(next_segment['narration_audio_b64'])
+                        st.rerun()
             with col2:
-                if choice['audio_url']:
-                    # This button replays the audio for the choice
-                    if st.button("🔊", key=f"play_{choice['text']}"):
-                        st.audio(f"{BACKEND_URL}{choice['audio_url']}")
+                # Button to replay the audio for this specific choice
+                if st.button("🔊", key=f"play_{choice['text']}"):
+                    st.session_state.audio_to_play = base64.b64decode(choice['audio_b64'])
+                    st.rerun()
