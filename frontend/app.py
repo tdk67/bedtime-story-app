@@ -2,10 +2,10 @@ import streamlit as st
 import yaml
 import requests
 import base64
+import time
 
 # --- Configuration ---
 BACKEND_URL = "http://127.0.0.1:8000"
-
 try:
     with open("config.yaml", 'r') as file:
         config = yaml.safe_load(file)
@@ -23,32 +23,56 @@ if 'history' not in st.session_state:
     st.session_state.history = []
 if 'audio_to_play' not in st.session_state:
     st.session_state.audio_to_play = None
+if 'pregen_jobs' not in st.session_state:
+    st.session_state.pregen_jobs = {} # Stores job IDs for pre-generated choices
 
 # --- UI Elements ---
-# This placeholder will be used to play audio clips without disrupting the layout
 audio_placeholder = st.empty()
-
-# If an audio clip is scheduled to play, render it here and reset
 if st.session_state.audio_to_play:
     audio_placeholder.audio(st.session_state.audio_to_play, format='audio/mp3', autoplay=True)
     st.session_state.audio_to_play = None
 
 # --- API Call Functions ---
-def get_story_start():
-    response = requests.post(f"{BACKEND_URL}/start_story", json={"config": config})
+def trigger_generation(history=None, choice=None):
+    payload = {"config": config}
+    if history and choice:
+        payload["conversation_history"] = history
+        payload["choice"] = choice
+    
+    response = requests.post(f"{BACKEND_URL}/generate/start", json=payload)
     response.raise_for_status()
-    return response.json()
+    return response.json()['job_id']
 
-def get_story_next(history, choice):
-    response = requests.post(
-        f"{BACKEND_URL}/next_step",
-        json={"conversation_history": history, "choice": choice, "config": config}
-    )
+def get_status(job_id):
+    if not job_id: return "not_found"
+    response = requests.get(f"{BACKEND_URL}/generate/status/{job_id}")
+    response.raise_for_status()
+    return response.json()['status']
+
+def poll_for_result(job_id):
+    if not job_id:
+        st.error("Something went wrong, no job to poll.")
+        return None
+        
+    while True:
+        status = get_status(job_id)
+        if status == 'complete':
+            break
+        elif status == 'failed':
+            st.error("Story generation failed. Please try again.")
+            return None
+        time.sleep(1)
+    
+    response = requests.get(f"{BACKEND_URL}/generate/result/{job_id}")
     response.raise_for_status()
     return response.json()
 
 # --- UI Views ---
 if st.session_state.view == 'intro':
+    # Pre-generate the first story segment while the video plays
+    if not st.session_state.pregen_jobs.get('intro_job'):
+        st.session_state.pregen_jobs['intro_job'] = trigger_generation()
+
     try:
         with open(config['intro_video_path'], 'rb') as video_file:
             video_bytes = video_file.read()
@@ -57,55 +81,61 @@ if st.session_state.view == 'intro':
         st.warning(f"Intro video not found at: {config['intro_video_path']}")
 
     if st.button("Let's start the adventure!"):
-        with st.spinner("Our storyteller is getting ready..."):
-            try:
-                story_data = get_story_start()
+        with st.spinner("Story is loading..."):
+            job_id = st.session_state.pregen_jobs.get('intro_job')
+            story_data = poll_for_result(job_id)
+            if story_data:
                 st.session_state.history = [story_data]
                 st.session_state.view = 'story'
-                # Schedule the main narration audio to play automatically
                 st.session_state.audio_to_play = base64.b64decode(story_data['narration_audio_b64'])
+                st.session_state.pregen_jobs = {} # Clear jobs for the next round
                 st.rerun()
-            except requests.exceptions.RequestException as e:
-                st.error(f"Could not connect to the story engine. Is the backend running? Error: {e}")
 
 elif st.session_state.view == 'story':
-    # Display the full story history from the session state
     for entry in st.session_state.history:
         st.markdown(entry['story_text'])
     
-    # Get the most recent story segment to work with
     current_segment = st.session_state.history[-1]
     
-    # Check if the story has ended
+    # --- Pre-generate next steps in the background ---
+    if not st.session_state.pregen_jobs and current_segment['choices']:
+        for choice in current_segment['choices']:
+            st.session_state.pregen_jobs[choice['text']] = trigger_generation(
+                current_segment['conversation_history'], choice['text']
+            )
+
     if not current_segment['choices']:
         st.balloons()
         st.markdown("### The End")
         if st.button("Start a New Adventure?"):
             st.session_state.view = 'intro'
             st.session_state.history = []
+            st.session_state.pregen_jobs = {}
             st.rerun()
     else:
         st.markdown("---")
         st.write("**What should we do next?**")
         
-        # Display the choices with replay buttons
         for choice in current_segment['choices']:
-            col1, col2 = st.columns([0.85, 0.15])
-            
+            job_id = st.session_state.pregen_jobs.get(choice['text'])
+            status = get_status(job_id)
+
+            col1, col2, col3 = st.columns([0.7, 0.15, 0.15])
             with col1:
-                # Button to select a choice and continue the story
                 if st.button(choice['text'], key=f"choice_{choice['text']}"):
-                    with st.spinner("Turning the page..."):
-                        next_segment = get_story_next(
-                            current_segment['conversation_history'],
-                            choice['text']
-                        )
-                        st.session_state.history.append(next_segment)
-                        # Schedule the next segment's main narration to play
-                        st.session_state.audio_to_play = base64.b64decode(next_segment['narration_audio_b64'])
-                        st.rerun()
+                    with st.spinner("Finalizing your choice..."):
+                        next_segment = poll_for_result(job_id)
+                        if next_segment:
+                            st.session_state.history.append(next_segment)
+                            st.session_state.audio_to_play = base64.b64decode(next_segment['narration_audio_b64'])
+                            st.session_state.pregen_jobs = {} # Clear old jobs
+                            st.rerun()
             with col2:
-                # Button to replay the audio for this specific choice
                 if st.button("🔊", key=f"play_{choice['text']}"):
                     st.session_state.audio_to_play = base64.b64decode(choice['audio_b64'])
                     st.rerun()
+            with col3:
+                # Show a polling indicator if the next step is still generating
+                if status != 'complete':
+                    with st.spinner(""):
+                        st.write("") # The spinner itself is the indicator
