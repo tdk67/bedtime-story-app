@@ -1,0 +1,29 @@
+# --- App Settings ---
+# Voice options: alloy, echo, fable, onyx, nova, shimmer
+voice: "fable" 
+intro_video_path: "data/BedtimeStoryIntro.mp4"
+
+# --- Child's Information ---
+# This file contains personal details to tailor the story.
+# 'name' and 'age' are mandatory. All others are optional.
+
+child_info:
+  name: "Marton"
+  age: 5
+
+# --- Optional Details for Deeper Personalization ---
+# The more details you provide, the more personalized the story can be.
+personalization:
+  favourite_colour: "yellow"
+  favourite_food: "marshmellow"
+  favourite_animal: "pig"
+  # You can add more activities here.
+  favourite_activities:
+    - "building tall towers with blocks"
+    - "running super fast in the park"
+    - "singing"
+  #best_friend_name: "Sam"
+  pet_name: "Pip"
+  pet_type: "hamster"
+  # A place the child likes or dreams of visiting.
+  place_to_visit: "Starbucks"
