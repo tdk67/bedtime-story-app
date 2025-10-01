@@ -1,118 +1,138 @@
 # ✨ Story Weaver: An Interactive AI Storyteller
 
-Story Weaver is a project aimed at creating a personalized, interactive, and co-creative storytelling experience for children. [cite_start]The core idea is to move beyond passive story generation and empower a child to become the author and hero of their own adventure[cite: 147, 171].
+Story Weaver is a project aimed at creating a personalized, interactive, and co-creative storytelling experience for children. The core idea is to move beyond passive story generation and empower a child to become the author and hero of their own adventure.
 
-[cite_start]This application is built on a "Safety-by-Design" framework, ensuring that every story is a positive, gentle, and reassuring experience appropriate for bedtime[cite: 153]. By leveraging a powerful Large Language Model (LLM), Story Weaver crafts unique, branching narratives that incorporate a child's personal details—like their name, favorite color, and favorite activities—directly into the plot.
+This application is built on a "Safety-by-Design" framework, ensuring that every story is a positive, gentle, and reassuring experience appropriate for bedtime. By leveraging a powerful Large Language Model (LLM), Story Weaver crafts unique, branching narratives that incorporate a child's personal details—like their name, favorite color, and favorite activities—directly into the plot.
 
-## Current Version: The Core Text Engine
+## 🧠 Asynchronous Generation Logic
 
-[cite_start]This initial version represents **Phase 1: The Core Experience**[cite: 76]. We have built the foundational text-based storytelling loop. It's a simple but powerful demonstration of the core mechanics:
+To create a seamless and responsive experience, Story Weaver uses an asynchronous "Fire and Poll" pattern to generate story segments. This significantly reduces the perceived waiting time for the user.
 
-* [cite_start]**Deep Personalization**: The story is built around the child's details provided in a simple configuration file[cite: 163].
-* [cite_start]**Interactive Branching Narrative**: The child actively directs the story by making choices at key points, transforming them from a listener into a co-creator[cite: 166, 252].
-* [cite_start]**Safe & Positive Storytelling**: The AI is guided by a carefully crafted prompt that enforces a calm tone, guarantees a happy ending, and weaves in a gentle moral lesson[cite: 66, 196].
-* [cite_start]**Simple Web Interface**: A clean UI built with Streamlit allows for easy testing and interaction[cite: 34].
+1.  **Fire (Trigger Generation)**: As soon as possible (e.g., while the intro video is playing), the frontend sends a quick request to the backend to start generating the next story segment(s). The backend immediately returns a unique `job_id` and begins the slow AI generation process in the background.
+
+2.  **Pre-generation**: This pattern is used to get a head start. While the user listens to the current story part, the app is already generating all possible next steps in the background.
+
+3.  **Poll (Check Status)**: When the user makes a choice, the frontend uses the corresponding `job_id` to ask the backend's status endpoint, "Is the story ready yet?".
+
+4.  **Fetch (Get Result)**: Once the backend confirms the generation is complete, the frontend makes one final call to retrieve the finished story text and audio. This makes the transition between story parts feel almost instantaneous.
+
+---
+
+## 🏗️ Project Structure
+
+The application is now split into a **backend** (the engine) and a **frontend** (the user interface).
+
+```
+story_weaver/
+├── .env                  # Securely stores your API key
+├── backend/
+│   ├── main.py           # The FastAPI server, API endpoints, and AI logic
+│   └── requirements.txt  # Python libraries for the backend
+└── frontend/
+    ├── app.py            # The Streamlit user interface code
+    ├── config.yaml       # Personalization details for the child's story
+    ├── data/
+    │   └── intro.mp4     # The introductory video file
+    └── requirements.txt  # Python libraries for the frontend
+```
 
 ---
 
 ## ⚙️ Installation and Setup
 
-Follow these steps to get the Story Weaver running on your local machine.
-
 ### 1. Prerequisites
 
-* **Python 3.8+**: Ensure you have a modern version of Python installed.
-* **Git**: Required to clone the repository.
+* **Python 3.8+**
+* **Git**
 
-### 2. Clone the Repository
+### 2. Clone and Set Up
 
-Open your terminal and clone the project files:
 ```bash
 git clone <your-repository-url>
 cd story-weaver
 ```
 
-### 3. Set Up a Virtual Environment
+### 3. Install Dependencies (Two Steps)
 
-It's highly recommended to use a virtual environment to manage project dependencies.
+This project has separate dependencies for the backend and frontend. You'll need to run `pip install` in each folder.
+
+**A. Install Backend Dependencies:**
 ```bash
-# Create the virtual environment
+# From the root story_weaver/ folder:
+cd backend
 python -m venv venv
-
-# Activate it
-# On macOS/Linux:
-source venv/bin/activate
-# On Windows:
-.\venv\Scripts\activate
-```
-
-### 4. Install Dependencies
-
-Install the required Python libraries using the provided `requirements.txt` file (you would create this file with the content `streamlit`, `openai`, `pyyaml`, `python-dotenv`).
-```bash
+source venv/bin/activate  # or .\venv\Scripts\activate on Windows
 pip install -r requirements.txt
+cd .. 
 ```
 
-### 5. Get Your API Key
+**B. Install Frontend Dependencies:**
+```bash
+# From the root story_weaver/ folder:
+cd frontend
+python -m venv venv
+source venv/bin/activate  # or .\venv\Scripts\activate on Windows
+pip install -r requirements.txt
+cd ..
+```
 
-This project uses the **OpenAI API** as its story engine.
+### 4. Get Your API Key
 
-1.  Go to the [OpenAI Platform website](https://platform.openai.com/api-keys).
-2.  Sign up or log in to your account.
-3.  Navigate to the API Keys section and create a new secret key.
-4.  Copy the key immediately. You won't be able to see it again.
-
-### 6. Configure Your Environment
-
-Create a file named `.env` in the root of your project folder. This file securely stores your API key where the application can access it. Add your key to this file:
+Get your API key from the [OpenAI Platform](https://platform.openai.com/api-keys) and place it in a `.env` file in the project's root directory.
 
 **.env**
 ```
 OPENAI_API_KEY="sk-YourSecretApiKeyGoesHere"
 ```
 
-### 7. Personalize the Story
+### 5. Personalize the Story
 
-Open the `config.yaml` file to add the child's details. The `name` and `age` are mandatory, but the more details you provide, the more personalized the story will be.
-
-**config.yaml**
-```yaml
-child_info:
-  name: "Alex"
-  age: 6
-
-personalization:
-  favourite_colour: "sky blue"
-  favourite_food: "strawberry yogurt"
-  # ... and other details
-```
+Edit `frontend/config.yaml` to add the child's details and configure the intro video and voice.
 
 ---
 
-## 🚀 Usage
+## 🚀 Usage (Running the App)
 
-Once the setup is complete, running the application is simple. Make sure your virtual environment is activated, then run the following command in your terminal:
+Because the app is now two separate parts, you need to run them in **two separate terminals**.
 
+### Terminal 1: Run the Backend
+
+Navigate to the `backend` folder and start the FastAPI server.
 ```bash
+cd backend
+# Make sure your backend virtual environment is activated
+uvicorn main:app --reload
+```
+The server will be running at `http://127.0.0.1:8000`.
+
+### Terminal 2: Run the Frontend
+
+Navigate to the `frontend` folder and run the Streamlit app.
+```bash
+cd frontend
+# Make sure your frontend virtual environment is activated
 streamlit run app.py
 ```
-
-Your default web browser will open a new tab with the Story Weaver application ready to go!
+Your web browser will open with the Story Weaver application.
 
 ---
 
 ## 🛠️ Technology Stack
 
-* **Streamlit**: A Python library used to create the simple, interactive web-based user interface for testing the story engine.
-* [cite_start]**OpenAI API**: The core LLM that serves as the dynamic storyteller, generating narrative segments based on the system prompt and user choices[cite: 287].
-* [cite_start]**Python-dotenv**: Used for securely managing the `OPENAI_API_KEY` by loading it from a `.env` file[cite: 44].
-* **PyYAML**: A library for reading the `config.yaml` file, which holds all the personalization details for the child.
+#### Backend
+* **FastAPI**: A modern, high-performance web framework for building the API.
+* **Uvicorn**: A lightning-fast server to run the FastAPI application.
+* **OpenAI**: The official Python library for interacting with the GPT and TTS models.
+* **Python-dotenv**: For securely managing the API key.
+
+#### Frontend
+* **Streamlit**: A Python library used to create the simple, interactive web-based user interface.
+* **Requests**: A library for making HTTP requests from the frontend to the backend API.
+* **PyYAML**: For reading the `config.yaml` file.
 
 ---
 
 ## 🗺️ Future Roadmap
 
-This text-based engine is the foundation. The project roadmap includes exciting next steps to bring the full vision to life:
-
-* [cite_start]**Phase 2: Adding Visuals**: Integrate an image generation model like Stable Diffusion or DALL-E 3 to create illustrations for each story segment[cite: 78, 295]. [cite_start]A key challenge will be creating a *consistent character* based on a child's photo[cite: 80, 301].
-* [cite_start]**Phase 3: The Audio Experience**: Implement Speech-to-Text for voice commands and Text-to-Speech for story narration, creating a fully immersive, screen-optional experience[cite: 77, 285, 290].
+* **Phase 2: Adding Visuals**: Integrate an image generation model to create illustrations for each story segment, with a focus on creating a *consistent character*.
+* **Phase 3: Voice Input**: Implement Speech-to-Text to allow the child to speak their choices instead of clicking buttons.
