@@ -6,6 +6,9 @@ from pydantic import BaseModel
 from openai import OpenAI
 from dotenv import load_dotenv
 import re
+import google.generativeai as genai
+from PIL import Image
+from io import BytesIO
 
 # Load environment variables
 load_dotenv("../.env")
@@ -13,16 +16,20 @@ load_dotenv("../.env")
 # --- Configuration & Initialization ---
 app = FastAPI()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+
 app.state.jobs = {}
 
-# --- Pydantic Models (Unchanged) ---
+# --- Pydantic Models ---
 class StoryChoice(BaseModel):
     text: str
     audio_b64: str
+    image_b64: str
 
 class StorySegment(BaseModel):
     story_text: str
     narration_audio_b64: str
+    main_illustration_b64: str
     choices: list[StoryChoice]
     conversation_history: list[dict]
 
@@ -45,8 +52,6 @@ def get_story_prompt(config: dict):
     personalization_details = ", ".join(
         f"{key.replace('_', ' ')} is {value}" for key, value in personalization.items() if value
     )
-    # --- PROMPT FIX ---
-    # The instructions are now much stricter to prevent the AI from generating the whole story at once.
     return f"""
     You are a world-class bedtime storyteller for a {child_info.get('age', 6)}-year-old child named {child_info.get('name', 'Friend')}.
     Your primary goal is to create a gentle, interactive, and personalized story.
@@ -66,7 +71,6 @@ def get_story_prompt(config: dict):
     """
 
 def generate_tts_bytes(text: str, voice: str) -> bytes | None:
-    # This function is unchanged
     try:
         response = client.audio.speech.create(model="tts-1", voice=voice, input=text)
         return response.content
@@ -74,13 +78,38 @@ def generate_tts_bytes(text: str, voice: str) -> bytes | None:
         print(f"Error generating TTS: {e}")
         return None
 
+def generate_image_bytes(prompt: str, reference_image: Image, high_quality: bool = False) -> bytes | None:
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash-image-preview')
+        
+        full_prompt = f"{prompt}. The main character should look like the person in the provided image."
+        if high_quality:
+            # --- FIX: Request a 1:1 aspect ratio for the main illustration ---
+            full_prompt += " Generate a beautiful, high-quality, square (1:1 aspect ratio) storybook illustration in a whimsical and gentle art style."
+        else:
+            full_prompt += " Generate a small, square (1:1 aspect ratio), simple, clear, and cute icon-style image on a plain white background, showing only the key object/concept of the choice."
+        
+        response = model.generate_content([full_prompt, reference_image])
+        
+        if response.candidates:
+            first_candidate = response.candidates[0]
+            if first_candidate.content and first_candidate.content.parts:
+                for part in first_candidate.content.parts:
+                    if part.inline_data:
+                        return part.inline_data.data
+        return None
+
+    except Exception as e:
+        print(f"Error generating Image: {e}")
+        return None
+
+
 def parse_story_and_choices(response_text: str):
-    # This function is unchanged
     choices_text = re.findall(r'\[(.*?)\]', response_text)
     story_part = re.split(r'\[', response_text)[0].strip()
     return story_part, choices_text
 
-# --- Background Processing & Endpoints (Unchanged) ---
+# --- Background Processing & Endpoints ---
 def process_story_in_background(job_id: str, history: list, config: dict):
     try:
         app.state.jobs[job_id]['status'] = 'generating_text'
@@ -88,26 +117,42 @@ def process_story_in_background(job_id: str, history: list, config: dict):
         llm_response_text = response.choices[0].message.content
         history.append({"role": "assistant", "content": llm_response_text})
 
-        app.state.jobs[job_id]['status'] = 'generating_audio'
+        app.state.jobs[job_id]['status'] = 'generating_media'
         story_text, choices_list_text = parse_story_and_choices(llm_response_text)
         voice = config.get("voice", "alloy")
 
         text_for_narration = story_text
         if choices_list_text:
-            text_for_narration += f" {' '.join(choices_list_text)}"
+            text_for_narration += " " + " ".join(choices_list_text)
+
         narration_audio_bytes = generate_tts_bytes(text_for_narration, voice) or b""
         narration_audio_b64 = base64.b64encode(narration_audio_bytes).decode('utf-8')
         
-        choices_with_audio = []
+        child_photo_path = os.path.join("../frontend", config['child_photo_path'])
+        reference_image = Image.open(child_photo_path)
+        
+        main_illustration_bytes = generate_image_bytes(story_text, reference_image, high_quality=True) or b""
+        main_illustration_b64 = base64.b64encode(main_illustration_bytes).decode('utf-8')
+
+        choices_with_media = []
         for choice_text in choices_list_text:
             choice_audio_bytes = generate_tts_bytes(choice_text, voice) or b""
             choice_audio_b64 = base64.b64encode(choice_audio_bytes).decode('utf-8')
-            choices_with_audio.append({"text": choice_text, "audio_b64": choice_audio_b64})
+            
+            choice_image_bytes = generate_image_bytes(choice_text, reference_image) or b""
+            choice_image_b64 = base64.b64encode(choice_image_bytes).decode('utf-8')
+
+            choices_with_media.append({
+                "text": choice_text, 
+                "audio_b64": choice_audio_b64, 
+                "image_b64": choice_image_b64
+            })
 
         result = {
             "story_text": story_text,
             "narration_audio_b64": narration_audio_b64,
-            "choices": choices_with_audio,
+            "main_illustration_b64": main_illustration_b64,
+            "choices": choices_with_media,
             "conversation_history": history
         }
         app.state.jobs[job_id]['result'] = result
@@ -137,7 +182,7 @@ async def get_status(job_id: str):
     job = app.state.jobs.get(job_id, {})
     return {"job_id": job_id, "status": job.get("status", "not_found")}
 
-@app.get("/generate/result/{job_id}", response_model=StorySegment)
+@app.get("/generate/result/{job_id}")
 async def get_result(job_id: str):
     job = app.state.jobs.get(job_id, {})
     return job.get("result", {})

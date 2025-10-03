@@ -7,3 +7,5 @@ uvicorn
 pydantic
 pyyaml
 requests
+google-generativeai
+Pillow

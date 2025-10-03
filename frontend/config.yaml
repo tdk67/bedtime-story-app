@@ -2,6 +2,7 @@
 # Voice options: alloy, echo, fable, onyx, nova, shimmer
 voice: "fable" 
 intro_video_path: "data/BedtimeStoryIntro.mp4"
+child_photo_path: "data/child_photo.png"
 
 # --- Child's Information ---
 # This file contains personal details to tailor the story.
