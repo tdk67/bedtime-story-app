@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Story Weaver</title>
+    <style>
+        /* --- THIS IS THE EXACT CSS FROM YOUR index_03.html FILE --- */
+        @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,700&display=swap');
+
+        body {
+            margin: 0;
+            font-family: 'Lora', serif;
+            color: #3a2411;
+            /* Using the corrected path from our previous steps */
+            background-image: url('data/background.png');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            min-height: 100vh;
+        }
+
+        .options-pane {
+            position: absolute;
+            height: 75%;
+            padding: 1%;
+            overflow-y: auto;
+            box-sizing: border-box;
+            top: 12%;
+            right: 8%;
+            width: 39%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .story-pane {
+            position: absolute;
+            padding: 1%;
+            overflow-y: auto;
+            box-sizing: border-box;
+            top: 1%;
+            left: 11%;
+            width: 39%;
+            height: auto;
+        }
+
+        .audio-player {
+            width: 80%;
+            display: block;
+            margin: 0 auto;
+            margin-bottom: 1rem;
+        }
+
+        .main-illustration {
+            width: 75%;
+            display: block;
+            margin: 0 auto;
+            border-radius: 15px;
+        }
+
+        .story-text {
+            font-size: 1.1rem;
+            text-align: left;
+            margin-top: 1rem;
+            width: 80%;
+            margin: 1rem auto 0 auto;
+        }
+
+        .choice-box {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .choice-image {
+            width: 120px;
+            height: 120px;
+            object-fit: cover;
+            border-radius: 8px;
+            flex-shrink: 0;
+        }
+
+        .choice-button {
+            width: 100%; /* Added to make buttons fill the space */
+            padding: 15px;
+            font-family: 'Lora', serif;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            background-color: rgba(210, 180, 140, 0.7);
+            border: 1px solid #4b3a26;
+            border-radius: 30px;
+            text-align: left;
+            padding-left: 20px;
+            box-sizing: border-box;
+            transition: background-color 0.3s; /* Added for hover effect */
+        }
+        
+        .choice-button:hover:not(:disabled) {
+            background-color: rgba(193, 163, 120, 0.9);
+        }
+
+        .choice-button:disabled {
+            background-color: #cccccc;
+            color: #666666;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+
+    <main>
+        <section class="story-pane">
+            <audio class="audio-player" id="audioPlayer" controls></audio>
+            <img class="main-illustration" id="mainIllustration" src="" alt="Main Story Illustration">
+            <p class="story-text" id="storyText"></p>
+        </section>
+
+        <aside class="options-pane" id="optionsPane">
+            </aside>
+    </main>
+
+    <script>
+        // --- Configuration ---
+        const BACKEND_URL = "http://127.0.0.1:8000";
+
+        // --- DOM Elements ---
+        const audioPlayer = document.getElementById('audioPlayer');
+        const mainIllustration = document.getElementById('mainIllustration');
+        const storyText = document.getElementById('storyText');
+        const optionsPane = document.getElementById('optionsPane');
+        
+        let currentStoryData = {};
+
+        // --- Core Functions ---
+
+        function updatePage(storyData) {
+            currentStoryData = storyData;
+
+            audioPlayer.src = `data:audio/mp3;base64,${storyData.narration_audio_b64}`;
+            audioPlayer.play().catch(e => {
+                console.warn("Audio autoplay was prevented by the browser. This is normal.");
+                console.error(e);
+            });
+
+            mainIllustration.src = `data:image/png;base64,${storyData.main_illustration_b64}`;
+            storyText.textContent = storyData.story_text;
+            optionsPane.innerHTML = ''; 
+
+            if (storyData.choices && storyData.choices.length > 0) {
+                const heading = document.createElement('h4');
+                heading.textContent = "What should we do next?";
+                optionsPane.appendChild(heading);
+
+                storyData.choices.forEach(choice => {
+                    const choiceBox = document.createElement('div');
+                    choiceBox.className = 'choice-box';
+
+                    const choiceImage = document.createElement('img');
+                    choiceImage.className = 'choice-image';
+                    choiceImage.src = `data:image/png;base64,${choice.image_b64}`;
+                    choiceImage.alt = choice.text;
+
+                    const choiceButton = document.createElement('button');
+                    choiceButton.className = 'choice-button';
+                    choiceButton.textContent = choice.text;
+                    choiceButton.onclick = () => handleChoice(choice.text);
+
+                    choiceBox.appendChild(choiceImage);
+                    choiceBox.appendChild(choiceButton);
+                    optionsPane.appendChild(choiceBox);
+                });
+            } else {
+                 optionsPane.innerHTML = `
+                    <div style="text-align: center;">
+                        <h2>The End!</h2>
+                        <button class="choice-button" style="width: auto; text-align: center; padding: 15px 30px;" onclick="window.location.href='intro.html'">
+                            Start a New Adventure?
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        async function handleChoice(choiceText) {
+            document.querySelectorAll('.choice-button').forEach(button => button.disabled = true);
+            try {
+                const config = JSON.parse(localStorage.getItem('storyConfig') || '{}');
+                const payload = {
+                    conversation_history: currentStoryData.conversation_history,
+                    choice: choiceText,
+                    config: config
+                };
+                const startResponse = await fetch(`${BACKEND_URL}/generate/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const { job_id } = await startResponse.json();
+                const nextSegment = await pollForResult(job_id);
+                if (nextSegment) {
+                    updatePage(nextSegment);
+                } else {
+                    throw new Error("Polling failed to return a result.");
+                }
+            } catch (error) {
+                console.error("Failed to get next story segment:", error);
+                optionsPane.innerHTML = '<h4>Oops! Something went wrong. Please <a href="intro.html">start over</a>.</h4>';
+            }
+        }
+
+        function pollForResult(jobId) {
+            return new Promise((resolve, reject) => {
+                const interval = setInterval(async () => {
+                    try {
+                        const statusResponse = await fetch(`${BACKEND_URL}/generate/status/${jobId}`);
+                        const { status } = await statusResponse.json();
+
+                        if (status === 'complete') {
+                            clearInterval(interval);
+                            const resultResponse = await fetch(`${BACKEND_URL}/generate/result/${jobId}`);
+                            const resultData = await resultResponse.json();
+                            resolve(resultData);
+                        } else if (status === 'failed') {
+                            clearInterval(interval);
+                            reject(new Error("Generation failed on backend."));
+                        }
+                    } catch (error) {
+                        clearInterval(interval);
+                        reject(error);
+                    }
+                }, 2000); 
+            });
+        }
+
+        window.onload = async () => {
+            const completedJobId = localStorage.getItem('completedJobId');
+            if (completedJobId) {
+                try {
+                    const response = await fetch(`${BACKEND_URL}/generate/result/${completedJobId}`);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const initialStoryData = await response.json();
+                    updatePage(initialStoryData);
+                    localStorage.removeItem('completedJobId');
+                } catch (error) {
+                    console.error("Could not fetch story data from backend:", error);
+                    optionsPane.innerHTML = '<h4>Could not load story. Please <a href="intro.html">start over</a>.</h4>';
+                }
+            } else {
+                console.error("No job ID found in localStorage. Redirecting to intro.");
+                window.location.href = 'intro.html';
+            }
+        };
+    </script>
+
+</body>
+</html>

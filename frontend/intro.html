@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to Story Weaver</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,700&display=swap');
+        body {
+            margin: 0;
+            font-family: 'Lora', serif;
+            color: #3a2411;
+            background-image: url('data/background.png');
+            background-color: #fdf5e6; /* A gentle fallback color */
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .intro-container {
+            text-align: center;
+            background-color: rgba(253, 245, 230, 0.9);
+            padding: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            max-width: 800px;
+            width: 90%;
+        }
+        .video-player {
+            width: 100%;
+            border-radius: 8px;
+            border: 3px solid #fdf5e6;
+            margin-bottom: 2rem;
+        }
+        .continue-button {
+            display: inline-block;
+            padding: 15px 30px;
+            font-family: 'Lora', serif;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #3a2411;
+            background-color: #D2B48C;
+            border: 1px solid #4b3a26;
+            border-radius: 30px;
+            text-decoration: none;
+            cursor: pointer;
+            transition: background-color 0.3s, opacity 0.3s;
+        }
+        .continue-button:hover:not(:disabled) {
+            background-color: #C1A37C;
+        }
+        .continue-button:disabled {
+            background-color: #cccccc;
+            color: #666666;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="intro-container">
+        <h1>Welcome to Story Weaver</h1>
+        <video class="video-player" controls autoplay muted loop>
+            <source src="data/BedtimeStoryIntro.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+        <a href="index.html" class="continue-button" id="startButton" disabled>Loading the magic... ✨</a>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const BACKEND_URL = "http://127.0.0.1:8000";
+        // This mirrors the structure of your config.yaml file.
+        // In a larger application, you might fetch this from the backend.
+        const storyConfig = {
+            "voice": "fable",
+            "child_photo_path": "data/child_photo_02.png",
+            "child_info": {
+                "name": "Marton",
+                "age": 5
+            },
+            "personalization": {
+                "favourite_colour": "yellow",
+                "favourite_food": "marshmallow",
+                "favourite_animal": "pig",
+                "favourite_activities": [
+                    "building tall towers with blocks",
+                    "running super fast in the park",
+                    "singing"
+                ],
+                "pet_name": "Pip",
+                "pet_type": "hamster",
+                "place_to_visit": "Starbucks"
+            }
+        };
+
+        const startButton = document.getElementById('startButton');
+        let pollingInterval; // To store our setInterval ID
+
+        // --- 1. "Fire": Trigger generation as soon as the page loads ---
+        async function triggerFirstGeneration() {
+            console.log("Triggering first story segment generation...");
+            try {
+                const response = await fetch(`${BACKEND_URL}/generate/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ config: storyConfig })
+                });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+                console.log("Received job ID:", data.job_id);
+                return data.job_id;
+            } catch (error) {
+                console.error("Could not trigger generation:", error);
+                startButton.textContent = "Error! Please refresh.";
+            }
+        }
+
+        // --- 2. "Poll": Check the status of the generation job ---
+        async function pollStatus(jobId) {
+            console.log(`Polling status for job ID: ${jobId}`);
+            try {
+                const response = await fetch(`${BACKEND_URL}/generate/status/${jobId}`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                if (data.status === 'complete') {
+                    console.log("Generation complete!");
+                    clearInterval(pollingInterval); // Stop polling
+                    fetchAndStoreResult(jobId); // Get the final data
+                } else if (data.status === 'failed') {
+                    console.error("Generation failed on the backend.");
+                    clearInterval(pollingInterval);
+                    startButton.textContent = "Error! Please refresh.";
+                }
+                // If status is 'pending' or 'generating_media', we just keep polling
+            } catch (error) {
+                console.error("Polling failed:", error);
+                clearInterval(pollingInterval);
+                startButton.textContent = "Error! Please refresh.";
+            }
+        }
+
+        // --- 3. "Fetch": Get the final result and store it ---
+        async function fetchAndStoreResult(jobId) {
+            console.log("Generation complete. Storing Job ID for next page.");
+            try {
+                // Store ONLY the completed job ID. This is a very small string.
+                localStorage.setItem('completedJobId', jobId);
+
+                // We don't need the storyConfig in localStorage anymore,
+                // let's pass it too for the next step.
+                localStorage.setItem('storyConfig', JSON.stringify(storyConfig));
+
+                // Update the button to show it's ready
+                startButton.textContent = "Start the Adventure ✨";
+                startButton.disabled = false;
+                console.log("Job ID stored. Button enabled.");
+
+            } catch (error) {
+                // This is a safeguard, but setItem on a small string should not fail.
+                console.error("Could not store Job ID:", error);
+                startButton.textContent = "Error! Please refresh.";
+            }
+        }
+        // --- Main execution on page load ---
+        window.onload = async () => {
+            // Clear any old story data
+            localStorage.removeItem('currentStorySegment');
+            
+            const jobId = await triggerFirstGeneration();
+            if (jobId) {
+                // Start polling every 2 seconds
+                pollingInterval = setInterval(() => pollStatus(jobId), 2000);
+            }
+        };
+    </script>
+</body>
+</html>
