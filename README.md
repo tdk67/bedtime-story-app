@@ -8,32 +8,33 @@ This application is built on a "Safety-by-Design" framework, ensuring that every
 
 To create a seamless and responsive experience, Story Weaver uses an asynchronous "Fire and Poll" pattern to generate story segments. This significantly reduces the perceived waiting time for the user.
 
-1.  **Fire (Trigger Generation)**: As soon as possible (e.g., while the intro video is playing), the frontend sends a quick request to the backend to start generating the next story segment(s). The backend immediately returns a unique `job_id` and begins the slow AI generation process in the background.
+1.  **Fire (Trigger Generation)**: As soon as the application's intro page loads, the frontend sends a request to the backend to start generating the first story segment. The backend immediately returns a unique `job_id` and begins the AI generation process in the background.
 
-2.  **Pre-generation**: This pattern is used to get a head start. While the user listens to the current story part, the app is already generating all possible next steps in the background.
+2.  **Pre-generation**: This pattern is used to get a head start. While the user watches the intro video, the app is already preparing the first part of the story.
 
-3.  **Poll (Check Status)**: When the user makes a choice, the frontend uses the corresponding `job_id` to ask the backend's status endpoint, "Is the story ready yet?".
+3.  **Poll (Check Status)**: The frontend periodically uses the `job_id` to ask the backend's status endpoint, "Is the story ready yet?".
 
-4.  **Fetch (Get Result)**: Once the backend confirms the generation is complete, the frontend makes one final call to retrieve the finished story text and audio. This makes the transition between story parts feel almost instantaneous.
+4.  **Fetch (Get Result)**: Once the backend confirms the generation is complete, the frontend makes one final call to retrieve the finished story text, images, and audio. This makes the transition between story parts feel almost instantaneous.
 
 ---
 
 ## 🏗️ Project Structure
 
-The application is now split into a **backend** (the engine) and a **frontend** (the user interface).
+The application is split into a **backend** (the engine) and a **frontend** (the user interface).
 
 ```
 story_weaver/
-├── .env                  # Securely stores your API key
+├── .env                  # Securely stores your API keys
 ├── backend/
 │   ├── main.py           # The FastAPI server, API endpoints, and AI logic
 │   └── requirements.txt  # Python libraries for the backend
 └── frontend/
-    ├── app.py            # The Streamlit user interface code
-    ├── config.yaml       # Personalization details for the child's story
-    ├── data/
-    │   └── intro.mp4     # The introductory video file
-    └── requirements.txt  # Python libraries for the frontend
+    ├── intro.html        # The starting page of the application
+    ├── index.html        # The main story and choices page
+    └── data/             # Folder for local assets like videos and images
+        ├── background.png
+        ├── BedtimeStoryIntro.mp4
+        └── child_photo_02.png
 ```
 
 ---
@@ -44,6 +45,7 @@ story_weaver/
 
 * **Python 3.8+**
 * **Git**
+* A modern **Web Browser** (like Chrome, Firefox, or Safari)
 
 ### 2. Clone and Set Up
 
@@ -52,11 +54,10 @@ git clone <your-repository-url>
 cd story-weaver
 ```
 
-### 3. Install Dependencies (Two Steps)
+### 3. Install Backend Dependencies
 
-This project has separate dependencies for the backend and frontend. You'll need to run `pip install` in each folder.
+This project only has server-side dependencies for the backend. The frontend runs directly in the browser with no installation needed.
 
-**A. Install Backend Dependencies:**
 ```bash
 # From the root story_weaver/ folder:
 cd backend
@@ -66,54 +67,45 @@ pip install -r requirements.txt
 cd .. 
 ```
 
-**B. Install Frontend Dependencies:**
-```bash
-# From the root story_weaver/ folder:
-cd frontend
-python -m venv venv
-source venv/bin/activate  # or .\venv\Scripts\activate on Windows
-pip install -r requirements.txt
-cd ..
-```
+### 4. Set Up Your API Keys
 
-### 4. Get Your API Key
-
-Get your API key from the [OpenAI Platform](https://platform.openai.com/api-keys) and place it in a `.env` file in the project's root directory.
+Get your API keys from the [OpenAI Platform](https://platform.openai.com/api-keys) and the [Google AI Studio](https://aistudio.google.com/app/apikey). Place them in a `.env` file in the project's root directory.
 
 **.env**
 ```
-OPENAI_API_KEY="sk-YourSecretApiKeyGoesHere"
+OPENAI_API_KEY="sk-YourSecretOpenAIApiKeyGoesHere"
+GOOGLE_API_KEY="YourSecretGoogleApiKeyGoesHere"
 ```
 
 ### 5. Personalize the Story
 
-Edit `frontend/config.yaml` to add the child's details and configure the intro video and voice.
+All personalization is now done directly in the frontend.
+
+1.  Open the `frontend/intro.html` file.
+2.  Find the `<script>` tag at the bottom.
+3.  Edit the `storyConfig` JavaScript object with the child's details.
 
 ---
 
 ## 🚀 Usage (Running the App)
 
-Because the app is now two separate parts, you need to run them in **two separate terminals**.
+You will need to perform two steps to run the application.
 
-### Terminal 1: Run the Backend
+### Step 1: Run the Backend Server
 
-Navigate to the `backend` folder and start the FastAPI server.
+In a terminal, navigate to the `backend` folder and start the FastAPI server.
 ```bash
 cd backend
 # Make sure your backend virtual environment is activated
 uvicorn main:app --reload
 ```
-The server will be running at `http://127.0.0.1:8000`.
+The server will be running at `http://12-7.0.0.1:8000`. Keep this terminal open.
 
-### Terminal 2: Run the Frontend
+### Step 2: Run the Frontend
 
-Navigate to the `frontend` folder and run the Streamlit app.
-```bash
-cd frontend
-# Make sure your frontend virtual environment is activated
-streamlit run app.py
-```
-Your web browser will open with the Story Weaver application.
+**There is no command to run.** Simply navigate to the `frontend` folder in your file explorer and **double-click the `intro.html` file** to open it in your web browser.
+
+The story will begin!
 
 ---
 
@@ -121,18 +113,19 @@ Your web browser will open with the Story Weaver application.
 
 #### Backend
 * **FastAPI**: A modern, high-performance web framework for building the API.
-* **Uvicorn**: A lightning-fast server to run the FastAPI application.
-* **OpenAI**: The official Python library for interacting with the GPT and TTS models.
-* **Python-dotenv**: For securely managing the API key.
+* **Uvicorn**: A lightning-fast ASGI server to run the FastAPI application.
+* **OpenAI**: The official Python library for interacting with the GPT-4o (text) and TTS (audio) models.
+* **Google Generative AI**: The official Python library for interacting with the Gemini model for image generation.
+* **Python-dotenv**: For securely managing API keys.
 
 #### Frontend
-* **Streamlit**: A Python library used to create the simple, interactive web-based user interface.
-* **Requests**: A library for making HTTP requests from the frontend to the backend API.
-* **PyYAML**: For reading the `config.yaml` file.
+* **HTML5**: Provides the structure and content of the web pages.
+* **CSS3**: Handles all styling, layout, and visual presentation.
+* **JavaScript (ES6+)**: Powers the application's interactivity, manages the "Fire and Poll" logic, and communicates with the backend API.
 
 ---
 
 ## 🗺️ Future Roadmap
 
-* **Phase 2: Adding Visuals**: Integrate an image generation model to create illustrations for each story segment, with a focus on creating a *consistent character*.
-* **Phase 3: Voice Input**: Implement Speech-to-Text to allow the child to speak their choices instead of clicking buttons.
+* **Phase 2: Voice Input**: Implement Speech-to-Text to allow the child to speak their choices instead of clicking buttons.
+* **Phase 3: Character Consistency**: Refine image generation prompts to maintain a more consistent character appearance throughout the story.
