@@ -74,35 +74,33 @@
     <script>
         // --- Configuration ---
         const BACKEND_URL = "http://127.0.0.1:8000";
-        // This mirrors the structure of your config.yaml file.
-        // In a larger application, you might fetch this from the backend.
-        const storyConfig = {
-            "voice": "fable",
-            "child_photo_path": "data/child_photo_02.png",
-            "child_info": {
-                "name": "Marton",
-                "age": 5
-            },
-            "personalization": {
-                "favourite_colour": "yellow",
-                "favourite_food": "marshmallow",
-                "favourite_animal": "pig",
-                "favourite_activities": [
-                    "building tall towers with blocks",
-                    "running super fast in the park",
-                    "singing"
-                ],
-                "pet_name": "Pip",
-                "pet_type": "hamster",
-                "place_to_visit": "Starbucks"
-            }
-        };
 
+        // --- DOM Elements ---
         const startButton = document.getElementById('startButton');
-        let pollingInterval; // To store our setInterval ID
+        let pollingInterval;
 
-        // --- 1. "Fire": Trigger generation as soon as the page loads ---
-        async function triggerFirstGeneration() {
+        /**
+        * Fetches the story configuration from the backend.
+        */
+        async function fetchConfig() {
+            try {
+                const response = await fetch(`${BACKEND_URL}/config`);
+                if (!response.ok) throw new Error('Network response was not ok');
+                const config = await response.json();
+                if (config.error) throw new Error(config.error);
+                console.log("Successfully fetched config:", config);
+                return config;
+            } catch (error) {
+                console.error("Could not fetch config:", error);
+                startButton.textContent = "Error loading config!";
+                return null;
+            }
+        }
+
+        /**
+        * "Fire": Trigger generation using the fetched config.
+        */
+        async function triggerFirstGeneration(storyConfig) {
             console.log("Triggering first story segment generation...");
             try {
                 const response = await fetch(`${BACKEND_URL}/generate/start`, {
@@ -120,62 +118,70 @@
             }
         }
 
-        // --- 2. "Poll": Check the status of the generation job ---
-        async function pollStatus(jobId) {
+        /**
+        * "Poll": Check the status of the generation job.
+        */
+        function pollStatus(jobId, storyConfig) {
             console.log(`Polling status for job ID: ${jobId}`);
-            try {
-                const response = await fetch(`${BACKEND_URL}/generate/status/${jobId}`);
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                const data = await response.json();
+            const pollingAction = async () => {
+                try {
+                    const response = await fetch(`${BACKEND_URL}/generate/status/${jobId}`);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const data = await response.json();
 
-                if (data.status === 'complete') {
-                    console.log("Generation complete!");
-                    clearInterval(pollingInterval); // Stop polling
-                    fetchAndStoreResult(jobId); // Get the final data
-                } else if (data.status === 'failed') {
-                    console.error("Generation failed on the backend.");
+                    if (data.status === 'complete') {
+                        console.log("Generation complete!");
+                        clearInterval(pollingInterval);
+                        fetchAndStoreResult(jobId, storyConfig);
+                    } else if (data.status === 'failed') {
+                        console.error("Generation failed on the backend.");
+                        clearInterval(pollingInterval);
+                        startButton.textContent = "Error! Please refresh.";
+                    }
+                } catch (error) {
+                    console.error("Polling failed:", error);
                     clearInterval(pollingInterval);
                     startButton.textContent = "Error! Please refresh.";
                 }
-                // If status is 'pending' or 'generating_media', we just keep polling
-            } catch (error) {
-                console.error("Polling failed:", error);
-                clearInterval(pollingInterval);
-                startButton.textContent = "Error! Please refresh.";
-            }
+            };
+            pollingInterval = setInterval(pollingAction, 2000);
         }
 
-        // --- 3. "Fetch": Get the final result and store it ---
-        async function fetchAndStoreResult(jobId) {
-            console.log("Generation complete. Storing Job ID for next page.");
+        /**
+        * "Fetch": Store the completed job ID and config for the next page.
+        */
+        function fetchAndStoreResult(jobId, storyConfig) {
+            console.log("Storing Job ID and config for next page.");
             try {
-                // Store ONLY the completed job ID. This is a very small string.
                 localStorage.setItem('completedJobId', jobId);
-
-                // We don't need the storyConfig in localStorage anymore,
-                // let's pass it too for the next step.
                 localStorage.setItem('storyConfig', JSON.stringify(storyConfig));
-
-                // Update the button to show it's ready
                 startButton.textContent = "Start the Adventure ✨";
                 startButton.disabled = false;
-                console.log("Job ID stored. Button enabled.");
-
+                console.log("Job ID and config stored. Button enabled.");
             } catch (error) {
-                // This is a safeguard, but setItem on a small string should not fail.
                 console.error("Could not store Job ID:", error);
                 startButton.textContent = "Error! Please refresh.";
             }
         }
-        // --- Main execution on page load ---
+
+        /**
+        * Main execution on page load.
+        */
         window.onload = async () => {
             // Clear any old story data
-            localStorage.removeItem('currentStorySegment');
+            localStorage.removeItem('completedJobId');
+            localStorage.removeItem('storyConfig');
             
-            const jobId = await triggerFirstGeneration();
-            if (jobId) {
-                // Start polling every 2 seconds
-                pollingInterval = setInterval(() => pollStatus(jobId), 2000);
+            // 1. Fetch the config from the backend
+            const storyConfig = await fetchConfig();
+            
+            if (storyConfig) {
+                // 2. Trigger the story generation with the fetched config
+                const jobId = await triggerFirstGeneration(storyConfig);
+                if (jobId) {
+                    // 3. Start polling for the result
+                    pollStatus(jobId, storyConfig);
+                }
             }
         };
     </script>
