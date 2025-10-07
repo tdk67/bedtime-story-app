@@ -1,6 +1,6 @@
 # --- App Settings ---
 # Voice options: alloy, echo, fable, onyx, nova, shimmer
-voice: "fable" 
+voice: "onyx" 
 intro_video_path: "data/BedtimeStoryIntro.mp4"
 child_photo_path: "data/child_photo_02.png"
 

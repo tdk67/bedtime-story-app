@@ -5,14 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Story Weaver</title>
     <style>
-        /* --- THIS IS THE EXACT CSS FROM YOUR index_03.html FILE --- */
         @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,700&display=swap');
 
         body {
             margin: 0;
             font-family: 'Lora', serif;
             color: #3a2411;
-            /* Using the corrected path from our previous steps */
             background-image: url('data/background.png');
             background-size: cover;
             background-position: center;
@@ -27,8 +25,8 @@
             overflow-y: auto;
             box-sizing: border-box;
             top: 12%;
-            right: 8%;
-            width: 39%;
+            right: 12%;
+            width: 30%;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -72,6 +70,24 @@
             align-items: center;
             gap: 1rem;
             margin-bottom: 1rem;
+            position: relative; /* For the spinner */
+        }
+        
+        /* Spinner for loading choices */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #4b3a26;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        @keyframes spin {
+            to { transform: translateY(-50%) rotate(360deg); }
         }
 
         .choice-image {
@@ -83,7 +99,6 @@
         }
 
         .choice-button {
-            width: 100%; /* Added to make buttons fill the space */
             padding: 15px;
             font-family: 'Lora', serif;
             font-size: 1rem;
@@ -95,7 +110,8 @@
             text-align: left;
             padding-left: 20px;
             box-sizing: border-box;
-            transition: background-color 0.3s; /* Added for hover effect */
+            transition: background-color 0.3s, opacity 0.3s;
+            white-space: normal;
         }
         
         .choice-button:hover:not(:disabled) {
@@ -106,11 +122,11 @@
             background-color: #cccccc;
             color: #666666;
             cursor: not-allowed;
+            opacity: 0.8;
         }
     </style>
 </head>
 <body>
-
     <main>
         <section class="story-pane">
             <audio class="audio-player" id="audioPlayer" controls></audio>
@@ -123,10 +139,8 @@
     </main>
 
     <script>
-        // --- Configuration ---
         const BACKEND_URL = "http://127.0.0.1:8000";
 
-        // --- DOM Elements ---
         const audioPlayer = document.getElementById('audioPlayer');
         const mainIllustration = document.getElementById('mainIllustration');
         const storyText = document.getElementById('storyText');
@@ -134,17 +148,14 @@
         
         let currentStoryData = {};
 
-        // --- Core Functions ---
-
+        /**
+         * Updates the page and triggers pre-generation for all new choices.
+         */
         function updatePage(storyData) {
             currentStoryData = storyData;
 
             audioPlayer.src = `data:audio/mp3;base64,${storyData.narration_audio_b64}`;
-            audioPlayer.play().catch(e => {
-                console.warn("Audio autoplay was prevented by the browser. This is normal.");
-                console.error(e);
-            });
-
+            audioPlayer.play().catch(e => console.warn("Audio autoplay prevented by browser."));
             mainIllustration.src = `data:image/png;base64,${storyData.main_illustration_b64}`;
             storyText.textContent = storyData.story_text;
             optionsPane.innerHTML = ''; 
@@ -166,40 +177,72 @@
                     const choiceButton = document.createElement('button');
                     choiceButton.className = 'choice-button';
                     choiceButton.textContent = choice.text;
-                    choiceButton.onclick = () => handleChoice(choice.text);
+                    choiceButton.disabled = true;
 
+                    const spinner = document.createElement('div');
+                    spinner.className = 'spinner';
+                    
                     choiceBox.appendChild(choiceImage);
                     choiceBox.appendChild(choiceButton);
+                    choiceBox.appendChild(spinner);
                     optionsPane.appendChild(choiceBox);
+
+                    preGenerateChoice(choice, choiceButton, spinner);
                 });
             } else {
-                 optionsPane.innerHTML = `
-                    <div style="text-align: center;">
-                        <h2>The End!</h2>
-                        <button class="choice-button" style="width: auto; text-align: center; padding: 15px 30px;" onclick="window.location.href='intro.html'">
-                            Start a New Adventure?
-                        </button>
-                    </div>
-                `;
+                optionsPane.innerHTML = `<div style="text-align: center;"><h2>The End!</h2><button class="choice-button" style="width: auto; text-align: center; padding: 15px 30px;" onclick="window.location.href='intro.html'">Start a New Adventure?</button></div>`;
             }
         }
 
-        async function handleChoice(choiceText) {
-            document.querySelectorAll('.choice-button').forEach(button => button.disabled = true);
+        /**
+         * Triggers generation for a single choice and enables its button when complete.
+         */
+        async function preGenerateChoice(choice, buttonElement, spinnerElement) {
             try {
                 const config = JSON.parse(localStorage.getItem('storyConfig') || '{}');
                 const payload = {
                     conversation_history: currentStoryData.conversation_history,
-                    choice: choiceText,
+                    choice: choice.text,
                     config: config
                 };
+                
                 const startResponse = await fetch(`${BACKEND_URL}/generate/start`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 const { job_id } = await startResponse.json();
-                const nextSegment = await pollForResult(job_id);
+
+                const pollInterval = setInterval(async () => {
+                    const statusResponse = await fetch(`${BACKEND_URL}/generate/status/${job_id}`);
+                    const { status } = await statusResponse.json();
+
+                    if (status === 'complete') {
+                        clearInterval(pollInterval);
+                        buttonElement.dataset.jobId = job_id; 
+                        buttonElement.disabled = false;
+                        spinnerElement.remove();
+                        buttonElement.onclick = () => handleChoice(job_id);
+                    } else if (status === 'failed') {
+                        clearInterval(pollInterval);
+                        buttonElement.textContent = "Error loading this path";
+                        spinnerElement.remove();
+                    }
+                }, 2500);
+            } catch (error) {
+                console.error("Failed to pre-generate choice:", error);
+                buttonElement.textContent = "Error loading this path";
+                spinnerElement.remove();
+            }
+        }
+
+        /**
+         * Fetches the pre-generated result and updates the page.
+         */
+        async function handleChoice(jobId) {
+            document.querySelectorAll('.choice-button').forEach(button => button.disabled = true);
+            try {
+                const nextSegment = await pollForResult(jobId);
                 if (nextSegment) {
                     updatePage(nextSegment);
                 } else {
@@ -210,7 +253,7 @@
                 optionsPane.innerHTML = '<h4>Oops! Something went wrong. Please <a href="intro.html">start over</a>.</h4>';
             }
         }
-
+        
         function pollForResult(jobId) {
             return new Promise((resolve, reject) => {
                 const interval = setInterval(async () => {
@@ -231,7 +274,7 @@
                         clearInterval(interval);
                         reject(error);
                     }
-                }, 2000); 
+                }, 1000); 
             });
         }
 
@@ -239,9 +282,7 @@
             const completedJobId = localStorage.getItem('completedJobId');
             if (completedJobId) {
                 try {
-                    const response = await fetch(`${BACKEND_URL}/generate/result/${completedJobId}`);
-                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                    const initialStoryData = await response.json();
+                    const initialStoryData = await pollForResult(completedJobId);
                     updatePage(initialStoryData);
                     localStorage.removeItem('completedJobId');
                 } catch (error) {
@@ -254,6 +295,5 @@
             }
         };
     </script>
-
 </body>
 </html>
