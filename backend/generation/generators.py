@@ -75,7 +75,7 @@ async def generate_image_bytes(prompt: str, reference_image: Image, high_quality
     # Note: Using the exact model name you specified.
     model = genai.GenerativeModel(gen_config.providers.google.image_model)
 
-    full_prompt = f"{prompt}. The main character should look like the person in the provided image."
+    full_prompt = f"{prompt}. The main character should look like the person in the provided image especially the face, the eyes, the nose, the chin should be recognizable."
     if high_quality:
         full_prompt += " A beautiful, high-quality, square (1:1) storybook illustration in a whimsical, gentle art style."
     else:
