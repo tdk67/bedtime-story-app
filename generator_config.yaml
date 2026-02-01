@@ -6,7 +6,7 @@ providers:
   google:
     # As specified, using the exact model name that works in your environment.
     # This will not be changed.
-    image_model: "gemini-2.5-flash-image-preview" 
+    image_model: "gemini-2.5-flash-image" 
 
 # The main system prompt for the storyteller
 story_prompt_1: |
