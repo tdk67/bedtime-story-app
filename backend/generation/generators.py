@@ -72,7 +72,6 @@ async def generate_audio_bytes(client: OpenAI, text: str, voice: str) -> bytes:
 
 async def generate_image_bytes(prompt: str, reference_image: Image, high_quality: bool = False) -> bytes:
     """Generates an image from a prompt using the configured image model."""
-    # Note: Using the exact model name you specified.
     model = genai.GenerativeModel(gen_config.providers.google.image_model)
 
     full_prompt = f"{prompt}. The main character should look like the person in the provided image especially the face, the eyes, the nose, the chin should be recognizable."
@@ -84,10 +83,10 @@ async def generate_image_bytes(prompt: str, reference_image: Image, high_quality
     response = await asyncio.to_thread(model.generate_content, [full_prompt, reference_image])
 
     if response.candidates:
-        first_candidate = response.candidates[0]
-        if first_candidate.content and first_candidate.content.parts:
-            for part in first_candidate.content.parts:
-                if part.inline_data:
-                    return part.inline_data.data # Correctly returns the image bytes
+        for candidate in response.candidates:
+            if candidate.content and candidate.content.parts:
+                for part in candidate.content.parts:
+                    if part.inline_data:
+                        return part.inline_data.data
 
     raise ValueError("No image data found in the API response.")
